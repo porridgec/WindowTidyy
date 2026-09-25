@@ -1,0 +1,58 @@
+name: WindowTidyy
+options:
+  bundleIdPrefix: com.porridgec
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  WindowTidyy:
+    type: application
+    platform: macOS
+    sources:
+      - path: WindowTidyy
+    settings:
+      base:
+        INFOPLIST_FILE: Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.porridgec.WindowTidyy
+        PRODUCT_NAME: WindowTidyy
+        # 默认 ad-hoc 签名（无个人信息）。要跨 rebuild 保留辅助功能授权，
+        # 用你自己的开发证书：把身份写进 signing.env（不入库，模板见 signing.env.example），
+        # 经 ./build.sh 构建即可覆盖。
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        ENABLE_HARDENED_RUNTIME: "YES"
+  WindowTidyyTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: WindowTidyyTests
+    dependencies:
+      - target: WindowTidyy
+    settings:
+      base:
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/WindowTidyy.app/Contents/MacOS/WindowTidyy"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        GENERATE_INFOPLIST_FILE: "YES"
+        # 测试 bundle 需与宿主 app 同签名身份（Hardened Runtime 库校验），
+        # 同样经 signing.env / ./build.sh 覆盖
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+schemes:
+  WindowTidyy:
+    build:
+      targets:
+        WindowTidyy: all
+        WindowTidyyTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - WindowTidyyTests
