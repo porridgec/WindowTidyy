@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func wireMonitor() {
         dragMonitor.onActivate = { [weak self] _, cursor in
             guard let self else { return }
-            self.overlay.show(tiles: self.store.quickLayouts,
+            self.overlay.show(tiles: self.store.overlayTiles,
                               cursorCG: cursor,
                               showTitles: self.store.settings.showTileTitles)
         }

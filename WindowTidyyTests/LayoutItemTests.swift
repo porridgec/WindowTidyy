@@ -129,3 +129,106 @@ final class FakeScreen: NSScreen {
     override var frame: NSRect { f }
     override var visibleFrame: NSRect { vf }
 }
+
+// MARK: - 互补布局聚合
+
+final class LayoutGroupingTests: XCTestCase {
+    private func item(_ name: String, _ sx: Int, _ sy: Int, _ ex: Int, _ ey: Int,
+                      gx: Int = 6, gy: Int = 6) -> LayoutItem {
+        LayoutItem(name: name, gridX: gx, gridY: gy, startX: sx, startY: sy, endX: ex, endY: ey)
+    }
+
+    func testHalvesGroupTogether() {
+        let left = item("左半屏", 0, 0, 3, 6)
+        let right = item("右半屏", 3, 0, 6, 6)
+        let centre = item("居中", 1, 1, 5, 5)
+        let full = item("全屏", 0, 0, 6, 6)
+        let tiles = LayoutGrouping.overlayTiles(from: [left, right, centre, full])
+        XCTAssertEqual(tiles.count, 3)
+        guard case let .group(members) = tiles[0] else {
+            return XCTFail("首个瓦片应为聚合组，实际 \(tiles[0])")
+        }
+        XCTAssertEqual(members.map(\.name), ["左半屏", "右半屏"])
+        XCTAssertEqual(tiles[1], .single(centre))
+        XCTAssertEqual(tiles[2], .single(full)) // 全屏独占，不参与聚合
+    }
+
+    func testQuartersGroupIntoOne() {
+        let tiles = LayoutGrouping.overlayTiles(from: [
+            item("左上", 0, 0, 3, 3),
+            item("右上", 3, 0, 6, 3),
+            item("左下", 0, 3, 3, 6),
+            item("右下", 3, 3, 6, 6),
+        ])
+        XCTAssertEqual(tiles.count, 1)
+        guard case .group(let members) = tiles[0] else { return XCTFail("应为聚合组") }
+        XCTAssertEqual(members.count, 4)
+        XCTAssertEqual(tiles[0].title, "左上+右上+左下+右下")
+    }
+
+    func testIncompletePartitionDoesNotGroup() {
+        // 只有左半屏 + 四个四分屏：四分屏成组，左半屏找不到互补 → 单瓦片
+        let tiles = LayoutGrouping.overlayTiles(from: [
+            item("左半屏", 0, 0, 3, 6),
+            item("左上", 0, 0, 3, 3),
+            item("右上", 3, 0, 6, 3),
+            item("左下", 0, 3, 3, 6),
+            item("右下", 3, 3, 6, 6),
+        ])
+        XCTAssertEqual(tiles.count, 2)
+        XCTAssertEqual(tiles[0].title, "左半屏") // 左半屏找不到互补 → 单瓦片
+        guard case .group(let m) = tiles[1] else { return XCTFail("四分屏应聚合") }
+        XCTAssertEqual(m.map(\.name), ["左上", "右上", "左下", "右下"])
+    }
+
+    func testDifferentGridsDoNotMix() {
+        // 6×6 的左半屏 + 4×4 的"右半屏"（各占自己网格一半）：网格不同不能聚合
+        let tiles = LayoutGrouping.overlayTiles(from: [
+            item("左半", 0, 0, 3, 6, gx: 6, gy: 6),
+            item("右半", 2, 0, 4, 4, gx: 4, gy: 4),
+        ])
+        XCTAssertEqual(tiles.map(\.title), ["左半", "右半"])
+    }
+
+    func testThirdsGroupOfThree() {
+        let tiles = LayoutGrouping.overlayTiles(from: [
+            item("左1/3", 0, 0, 2, 6),
+            item("中1/3", 2, 0, 4, 6),
+            item("右1/3", 4, 0, 6, 6),
+        ])
+        XCTAssertEqual(tiles.count, 1)
+        guard case .group(let m) = tiles[0] else { return XCTFail("三等分应聚合") }
+        XCTAssertEqual(m.count, 3)
+    }
+
+    func testOverlappingLayoutsDoNotGroup() {
+        // 两个区域重叠 → 无法精确覆盖
+        let tiles = LayoutGrouping.overlayTiles(from: [
+            item("左半", 0, 0, 3, 6),
+            item("右半偏左", 2, 0, 6, 6), // 与左半重叠 1 列
+        ])
+        XCTAssertEqual(tiles.count, 2)
+    }
+
+    func testGroupEmitsAtFirstMemberPosition() {
+        // 顺序：居中、右半屏、左半屏 → 组出现在"右半屏"的位置（组内首个成员=左半屏，位置跟随输入顺序中先出现者）
+        let tiles = LayoutGrouping.overlayTiles(from: [
+            item("居中", 1, 1, 5, 5),
+            item("右半屏", 3, 0, 6, 6),
+            item("左半屏", 0, 0, 3, 6),
+        ])
+        XCTAssertEqual(tiles.count, 2)
+        XCTAssertEqual(tiles[0].title, "居中")
+        guard case .group(let m) = tiles[1] else { return XCTFail("应为聚合组") }
+        XCTAssertEqual(Set(m.map(\.name)), ["左半屏", "右半屏"])
+    }
+
+    func testTileTitleAndGrid() {
+        XCTAssertEqual(OverlayTile.single(item("全屏", 0, 0, 6, 6)).title, "全屏")
+        let group = OverlayTile.group([item("左上", 0, 0, 3, 3), item("右下", 3, 3, 6, 6)])
+        // 左上+右下 不构成覆盖（缺右上/左下）— 但 OverlayTile 本身允许构造；title 仅拼接
+        XCTAssertEqual(group.title, "左上+右下")
+        XCTAssertEqual(group.grid.x, 6)
+        XCTAssertEqual(group.grid.y, 6)
+    }
+}

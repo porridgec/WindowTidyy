@@ -106,38 +106,22 @@ struct QuickSlotsTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("拖动窗口时，屏幕顶部将按以下顺序显示布局预览；把窗口拖到某个预览上松手即可应用。")
+            Text("拖动窗口时，屏幕顶部将按以下顺序显示布局预览；把窗口拖到某个预览上松手即可应用。互补布局（如 左半屏+右半屏）会自动聚合为一个瓦片，可在「触发与显示」中关闭。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
-            // 模拟瓦片条
-            HStack(spacing: OverlayMetrics.spacing) {
-                ForEach(Array(store.quickLayouts.enumerated()), id: \.element.id) { idx, item in
-                    VStack(spacing: 4) {
-                        LayoutPreviewView(item: item)
-                            .frame(width: OverlayMetrics.tileWidth - 16,
-                                   height: 46)
-                        Text(item.name)
-                            .font(.system(size: 11, weight: .medium))
-                            .lineLimit(1)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(width: OverlayMetrics.tileWidth - 16, height: 74)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.accentColor.opacity(0.08))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1)
-                    )
-                    .opacity(idx == 0 ? 1 : 0.85)
-                }
-                if store.quickLayouts.isEmpty {
-                    Text("没有可用的布局 — 请先在「布局库」选择")
+            // 模拟瓦片条（与拖动时的 overlay 一致，含聚合分组）
+            Group {
+                if store.overlayTiles.isEmpty {
+                    Text("没有可用的布局 — 请先在「布局库」选择或在下方槽位指定")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .padding()
+                } else {
+                    TileRowView(tiles: store.overlayTiles,
+                                hoveredIndex: nil,
+                                hoveredSubIndex: 0,
+                                showTitles: true)
                 }
             }
             .padding(OverlayMetrics.padding)
@@ -213,6 +197,10 @@ struct TriggerTab: View {
 
             Section("瓦片条显示") {
                 Toggle("在预览瓦片上显示布局名称", isOn: titlesBinding)
+                Toggle("聚合显示互补布局", isOn: groupBinding)
+                Text("恰好平铺整个网格的布局（左半屏+右半屏、四个四分屏、三等分…）合并为一个瓦片；拖动悬停时在瓦片内移动光标选择子布局。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Quick Layout 网格直选") {
@@ -260,6 +248,11 @@ struct TriggerTab: View {
     private var titlesBinding: Binding<Bool> {
         Binding(get: { store.settings.showTileTitles },
                 set: { v in store.update { $0.showTileTitles = v } })
+    }
+
+    private var groupBinding: Binding<Bool> {
+        Binding(get: { store.settings.autoGroupLayouts },
+                set: { v in store.update { $0.autoGroupLayouts = v } })
     }
 
     private var hotkeyBinding: Binding<HotKeyCombo?> {

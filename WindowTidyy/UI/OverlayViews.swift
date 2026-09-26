@@ -1,44 +1,58 @@
 import SwiftUI
 
-/// 顶部瓦片条：4 个布局预览并排，悬停高亮
+/// 顶部瓦片条：若干布局瓦片并排（聚合组为一个多区域瓦片），悬停高亮
 struct StripView: View {
     @ObservedObject var store: StripStore
 
     var body: some View {
+        TileRowView(tiles: store.tiles,
+                    hoveredIndex: store.hoveredIndex,
+                    hoveredSubIndex: store.hoveredSubIndex,
+                    showTitles: store.showTitles)
+            .padding(OverlayMetrics.padding)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+            )
+    }
+}
+
+/// 瓦片行（overlay 与设置中心的模拟条带复用）
+struct TileRowView: View {
+    let tiles: [OverlayTile]
+    let hoveredIndex: Int?
+    let hoveredSubIndex: Int
+    let showTitles: Bool
+
+    var body: some View {
         HStack(spacing: OverlayMetrics.spacing) {
-            ForEach(Array(store.tiles.enumerated()), id: \.element.id) { idx, item in
-                TileView(item: item,
-                         hovered: store.hoveredIndex == idx,
-                         showTitle: store.showTitles)
+            ForEach(Array(tiles.enumerated()), id: \.element.id) { idx, tile in
+                TileView(tile: tile,
+                         hovered: hoveredIndex == idx,
+                         hoveredSubIndex: hoveredIndex == idx ? hoveredSubIndex : 0,
+                         showTitle: showTitles)
             }
         }
-        .padding(OverlayMetrics.padding)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-        )
     }
 }
 
 struct TileView: View {
-    let item: LayoutItem
+    let tile: OverlayTile
     let hovered: Bool
+    let hoveredSubIndex: Int
     let showTitle: Bool
 
     var body: some View {
         VStack(spacing: 4) {
-            LayoutPreviewView(item: item,
-                              lineColor: hovered ? Color.white.opacity(0.55) : Color.primary.opacity(0.22),
-                              fillColor: hovered ? Color.white.opacity(0.95) : Color.accentColor.opacity(0.5))
+            TilePreview(tile: tile, hovered: hovered, activeIndex: hovered ? hoveredSubIndex : nil)
                 .frame(maxWidth: .infinity)
                 .frame(height: showTitle ? 50 : 66)
             if showTitle {
-                Text(item.name)
+                Text(tile.title)
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -60,7 +74,65 @@ struct TileView: View {
     }
 }
 
-/// 整屏目标区域预览：悬停瓦片时，高亮该布局在当前屏幕的实际落区
+/// 瓦片内的网格预览：单布局高亮一块区域；聚合组绘制所有子区域，激活的子区域最亮
+struct TilePreview: View {
+    let tile: OverlayTile
+    let hovered: Bool
+    /// 悬停聚合瓦片时激活的子布局下标；nil = 无悬停
+    var activeIndex: Int?
+
+    var body: some View {
+        GeometryReader { geo in
+            let grid = tile.grid
+            let cols = max(grid.x, 1)
+            let rows = max(grid.y, 1)
+            let cw = geo.size.width / CGFloat(cols)
+            let ch = geo.size.height / CGFloat(rows)
+
+            ZStack(alignment: .topLeading) {
+                // 网格线
+                Path { path in
+                    for c in 1..<max(cols, 1) {
+                        let x = cw * CGFloat(c)
+                        path.move(to: CGPoint(x: x, y: 0))
+                        path.addLine(to: CGPoint(x: x, y: geo.size.height))
+                    }
+                    for r in 1..<max(rows, 1) {
+                        let y = ch * CGFloat(r)
+                        path.move(to: CGPoint(x: 0, y: y))
+                        path.addLine(to: CGPoint(x: geo.size.width, y: y))
+                    }
+                }
+                .stroke(lineColor, lineWidth: 1)
+
+                // 各子布局区域
+                ForEach(Array(tile.layouts.enumerated()), id: \.element.id) { index, layout in
+                    let isActive = hovered && activeIndex == index
+                    let w = cw * CGFloat(layout.endX - layout.startX)
+                    let h = ch * CGFloat(layout.endY - layout.startY)
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(isActive ? Color.white.opacity(0.95)
+                              : (hovered ? Color.white.opacity(0.35) : fillColor(for: index)))
+                        .frame(width: w, height: h)
+                        .offset(x: cw * CGFloat(layout.startX), y: ch * CGFloat(layout.startY))
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+    }
+
+    private var lineColor: Color {
+        hovered ? Color.white.opacity(0.55) : Color.primary.opacity(0.22)
+    }
+
+    /// 聚合组内不同子区域用不同色相区分（未悬停时）
+    private func fillColor(for index: Int) -> Color {
+        let bases: [Color] = [.accentColor, .orange, .teal, .indigo, .pink, .green]
+        return bases[index % bases.count].opacity(0.5)
+    }
+}
+
+/// 整屏目标区域预览：悬停瓦片（聚合瓦片取激活子布局）时，高亮该布局在当前屏幕的实际落区
 struct ZoneView: View {
     @ObservedObject var store: StripStore
     let screen: NSScreen
@@ -68,8 +140,8 @@ struct ZoneView: View {
     var body: some View {
         GeometryReader { geo in
             let full = screen.frame
-            if let idx = store.hoveredIndex, idx < store.tiles.count, full.width > 0, full.height > 0 {
-                let rect = store.tiles[idx].targetRect(on: screen)
+            if let item = store.activeLayout, full.width > 0, full.height > 0 {
+                let rect = item.targetRect(on: screen)
                 let width = rect.width / full.width * geo.size.width
                 let height = rect.height / full.height * geo.size.height
                 let x = (rect.minX - full.minX) / full.width * geo.size.width

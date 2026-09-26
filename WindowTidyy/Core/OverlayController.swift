@@ -16,39 +16,51 @@ enum OverlayMetrics {
 
 /// overlay 状态（SwiftUI 观察）
 final class StripStore: ObservableObject {
-    @Published var tiles: [LayoutItem]
+    @Published var tiles: [OverlayTile]
     @Published var showTitles: Bool
+    /// 悬停的瓦片下标
     @Published var hoveredIndex: Int?
+    /// 聚合瓦片内悬停的子布局下标（单瓦片恒为 0）
+    @Published var hoveredSubIndex: Int = 0
 
-    init(tiles: [LayoutItem], showTitles: Bool) {
+    init(tiles: [OverlayTile], showTitles: Bool) {
         self.tiles = tiles
         self.showTitles = showTitles
+    }
+
+    /// 当前实际生效（高亮/将被应用）的布局
+    var activeLayout: LayoutItem? {
+        guard let idx = hoveredIndex, idx < tiles.count else { return nil }
+        let sub = min(max(hoveredSubIndex, 0), tiles[idx].layouts.count - 1)
+        return tiles[idx].layouts[sub]
     }
 }
 
 /// 拖动窗口时的 overlay：屏幕顶部居中的横向瓦片条 + 整屏目标区域预览层。
 /// 面板本身 ignoresMouseEvents —— 拖动期间鼠标事件属于被拖的窗口，
 /// 悬停判定由 DragMonitor 用光标坐标做命中测试（与原版 Window Tidy 相同）。
+/// 聚合瓦片（互补布局合并显示）内按光标所在格子选中子布局，
+/// 在瓦片内左右/上下移动即可在 左半屏/右半屏 等子布局间切换。
 final class OverlayController {
     private var stripPanel: NSPanel?
     private var zonePanel: NSPanel?
     private var store: StripStore?
 
-    private(set) var tiles: [LayoutItem] = []
+    private(set) var tiles: [OverlayTile] = []
     private(set) var tileRects: [NSRect] = [] // AppKit 屏幕坐标
     private(set) var screen: NSScreen?
     private var visible = false
 
     // MARK: - 显示 / 更新 / 隐藏
 
-    func show(tiles: [LayoutItem], cursorCG: CGPoint, showTitles: Bool) {
+    func show(tiles: [OverlayTile], cursorCG: CGPoint, showTitles: Bool) {
         hide()
         guard let scr = ScreenMath.screen(containingCG: cursorCG) ?? NSScreen.main,
               !tiles.isEmpty else {
             WTLog.log("WTDBG [overlay] show 被拒绝: screen=\(ScreenMath.screen(containingCG: cursorCG)?.localizedName ?? "nil") tiles=\(tiles.count)")
             return
         }
-        WTLog.log("WTDBG [overlay] show on \(scr.localizedName) tiles=\(tiles.map(\.name))")
+        WTLog.log("WTDBG [overlay] show on \(scr.localizedName) tiles=\(tiles.map(\.title))")
 
         self.tiles = tiles
         screen = scr
@@ -91,7 +103,7 @@ final class OverlayController {
         updateHover(cursorCG: cursorCG)
     }
 
-    /// 拖动中光标移动：命中测试 + 必要时把整组 overlay 搬到别的屏幕
+    /// 拖动中光标移动：命中测试（瓦片 + 聚合瓦片内子区域）+ 必要时换屏
     func updateHover(cursorCG: CGPoint) {
         guard visible else { return }
         let p = ScreenMath.appKitPoint(fromCG: cursorCG)
@@ -100,10 +112,16 @@ final class OverlayController {
             show(tiles: tiles, cursorCG: cursorCG, showTitles: store?.showTitles ?? true)
             return
         }
-        store?.hoveredIndex = tileRects.firstIndex { NSPointInRect(p, $0) }
+        guard let idx = tileRects.firstIndex(where: { NSPointInRect(p, $0) }), idx < tiles.count else {
+            store?.hoveredIndex = nil
+            store?.hoveredSubIndex = 0
+            return
+        }
+        store?.hoveredIndex = idx
+        store?.hoveredSubIndex = subIndex(tile: tiles[idx], in: tileRects[idx], point: p)
     }
 
-    /// 松手判定：光标落在哪个瓦片上
+    /// 松手判定：光标落在哪个瓦片的哪个子布局上
     func resolveDrop(cursorCG: CGPoint) -> (item: LayoutItem, screen: NSScreen)? {
         guard visible, let scr = screen else { return nil }
         let p = ScreenMath.appKitPoint(fromCG: cursorCG)
@@ -112,8 +130,10 @@ final class OverlayController {
             WTLog.log("WTDBG [overlay] drop 未命中瓦片 at appkit \(p), tiles=\(tileRects)")
             return nil
         }
-        WTLog.log("WTDBG [overlay] drop 命中瓦片 \(idx) (\(tiles[idx].name))")
-        return (tiles[idx], scr)
+        let sub = subIndex(tile: tiles[idx], in: tileRects[idx], point: p)
+        let item = tiles[idx].layouts[min(max(sub, 0), tiles[idx].layouts.count - 1)]
+        WTLog.log("WTDBG [overlay] drop 命中瓦片 \(idx) [\(tiles[idx].title)] 子布局 \(sub) (\(item.name))")
+        return (item, scr)
     }
 
     func hide() {
@@ -129,6 +149,25 @@ final class OverlayController {
     }
 
     var isVisible: Bool { visible }
+
+    // MARK: - 内部
+
+    /// 光标在瓦片内命中的子布局下标。网格 y 轴向下（顶行 startY=0），
+    /// 与瓦片绘制方向一致；AppKit 点需翻转到"距瓦片顶部"的坐标。
+    private func subIndex(tile: OverlayTile, in rect: NSRect, point: NSPoint) -> Int {
+        let layouts = tile.layouts
+        guard layouts.count > 1, let first = layouts.first else { return 0 }
+        let localX = point.x - rect.minX
+        let localYFromTop = rect.maxY - point.y
+        let cw = rect.width / CGFloat(max(first.gridX, 1))
+        let ch = rect.height / CGFloat(max(first.gridY, 1))
+        let cellX = min(max(Int(localX / max(cw, 0.001)), 0), first.gridX - 1)
+        let cellY = min(max(Int(localYFromTop / max(ch, 0.001)), 0), first.gridY - 1)
+        let hit = layouts.firstIndex {
+            cellX >= $0.startX && cellX < $0.endX && cellY >= $0.startY && cellY < $0.endY
+        }
+        return hit ?? 0
+    }
 
     private func makePanel(rect: NSRect) -> NSPanel {
         let panel = NSPanel(contentRect: rect,

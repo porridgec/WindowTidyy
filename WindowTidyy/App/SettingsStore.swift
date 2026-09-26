@@ -98,6 +98,8 @@ struct AppSettings: Codable, Equatable {
     var triggerModifierMask: UInt = NSEvent.ModifierFlags.option.deviceIndependentRawValue
     /// 瓦片上是否显示布局名称
     var showTileTitles = true
+    /// 聚合显示互补布局（原版 AutoGroupLayouts）：左右半屏、四分屏等合并为一个瓦片
+    var autoGroupLayouts = true
     // Quick Layout 网格直选
     var quickGridX = 6
     var quickGridY = 6
@@ -111,7 +113,7 @@ struct AppSettings: Codable, Equatable {
     // 自定义解码：容忍旧版本配置缺字段
     enum CodingKeys: String, CodingKey {
         case enabled, layouts, quickSlotIDs, triggerMode, triggerModifierMask
-        case showTileTitles, quickGridX, quickGridY, quickHotkey
+        case showTileTitles, autoGroupLayouts, quickGridX, quickGridY, quickHotkey
     }
 
     init(from decoder: Decoder) throws {
@@ -123,6 +125,7 @@ struct AppSettings: Codable, Equatable {
         triggerModifierMask = try c.decodeIfPresent(UInt.self, forKey: .triggerModifierMask)
             ?? NSEvent.ModifierFlags.option.deviceIndependentRawValue
         showTileTitles = try c.decodeIfPresent(Bool.self, forKey: .showTileTitles) ?? true
+        autoGroupLayouts = try c.decodeIfPresent(Bool.self, forKey: .autoGroupLayouts) ?? true
         quickGridX = try c.decodeIfPresent(Int.self, forKey: .quickGridX) ?? 6
         quickGridY = try c.decodeIfPresent(Int.self, forKey: .quickGridY) ?? 6
         quickHotkey = try c.decodeIfPresent(HotKeyCombo.self, forKey: .quickHotkey)
@@ -180,6 +183,14 @@ final class SettingsStore: ObservableObject {
         mutate(&s)
         s.repairQuickSlots()
         settings = s
+    }
+
+    /// overlay 实际显示的瓦片（应用聚合设置）
+    var overlayTiles: [OverlayTile] {
+        let layouts = quickLayouts
+        return settings.autoGroupLayouts
+            ? LayoutGrouping.overlayTiles(from: layouts)
+            : layouts.map { OverlayTile.single($0) }
     }
 
     /// 槽位实际生效的布局（按槽位顺序，跳过未使用）
