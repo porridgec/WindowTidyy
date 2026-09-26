@@ -55,13 +55,46 @@ struct TargetWindow {
 final class WindowEngine {
     static let shared = WindowEngine()
 
-    private let systemWide = AXUIElementCreateSystemWide()
+    /// AXUIElement 实例非线程安全；主线程与事件 tap 线程各持一份，
+    /// 共享同一实例会在 AX 运行时过度释放（实测 SIGSEV 于 CopyElementAtPosition）
+    private let mainSystemWide = AXUIElementCreateSystemWide()
+    private var tapSystemWide: AXUIElement?
+    private let tapSystemWideLock = NSLock()
     private let ownPID = ProcessInfo.processInfo.processIdentifier
+
+    private var systemWide: AXUIElement {
+        if Thread.isMainThread { return mainSystemWide }
+        tapSystemWideLock.lock()
+        defer { tapSystemWideLock.unlock() }
+        if tapSystemWide == nil {
+            tapSystemWide = AXUIElementCreateSystemWide()
+        }
+        return tapSystemWide!
+    }
+
+    /// 光标点是否落在本 app 自己的窗口内。
+    /// 不经 AX、只查窗口列表（CG 坐标）：点击自家 UI 时必须跳过 AX 自查询——
+    /// 自家 SwiftUI 重绘繁忙时被查询会在 AX 框架内崩溃（编辑器拖选闪退的根因）。
+    func isPointInsideOwnWindows(_ cgPoint: CGPoint) -> Bool {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+            as? [[String: Any]] else { return false }
+        for info in list {
+            guard (info[kCGWindowOwnerPID as String] as? Int32) == ownPID,
+                  let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let bounds = info[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
+            let rect = CGRect(x: bounds["X"] ?? 0, y: bounds["Y"] ?? 0,
+                              width: bounds["Width"] ?? 0, height: bounds["Height"] ?? 0)
+            if rect.contains(cgPoint) { return true }
+        }
+        return false
+    }
 
     // MARK: - 查找窗口
 
     /// 光标处的窗口：从命中的最深元素沿 kAXParent 上溯到 AXWindow，排除自身进程
     func windowUnderCursor(_ cgPoint: CGPoint) -> TargetWindow? {
+        // 自家窗口直接跳过（同时省掉一次 AX IPC）
+        guard !isPointInsideOwnWindows(cgPoint) else { return nil }
         var hit: AXUIElement?
         let status = AXUIElementCopyElementAtPosition(systemWide,
                                                       Float(cgPoint.x), Float(cgPoint.y), &hit)

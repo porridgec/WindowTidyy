@@ -109,6 +109,13 @@ final class DragMonitor {
     // MARK: - 状态机
 
     private func handle(eventType: CGEventType, event: CGEvent) {
+        // tap 线程由自家 runloop 驱动，回调不会自动包 autorelease pool
+        autoreleasepool {
+            handleInner(eventType: eventType, event: event)
+        }
+    }
+
+    private func handleInner(eventType: CGEventType, event: CGEvent) {
         switch eventType {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap {
