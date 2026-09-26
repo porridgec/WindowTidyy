@@ -99,26 +99,27 @@ struct LayoutLibraryTab: View {
     }
 }
 
-// MARK: - 快速布局
+// MARK: - 快速布局（自定义组：一组 = 一个瓦片）
 
 struct QuickSlotsTab: View {
     @EnvironmentObject var store: SettingsStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("拖动窗口时，屏幕顶部将按以下顺序显示布局预览；把窗口拖到某个预览上松手即可应用。互补布局（如 左半屏+右半屏）会自动聚合为一个瓦片，可在「触发与显示」中关闭。")
+        VStack(alignment: .leading, spacing: 14) {
+            Text("拖动窗口时，屏幕顶部按以下顺序显示瓦片。一个「组」即一个瓦片：组内放一个布局就是普通瓦片，放多个布局则聚合显示，拖动悬停时按光标所在区域选择子布局。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
-            // 模拟瓦片条（与拖动时的 overlay 一致，含聚合分组）
+            // 模拟瓦片条（与拖动时的 overlay 完全一致）
             Group {
-                if store.overlayTiles.isEmpty {
-                    Text("没有可用的布局 — 请先在「布局库」选择或在下方槽位指定")
+                if store.quickTiles.isEmpty {
+                    Text("暂无瓦片 — 点击下方「添加组」并在组内勾选布局")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
                         .padding()
                 } else {
-                    TileRowView(tiles: store.overlayTiles,
+                    TileRowView(tiles: store.quickTiles,
                                 hoveredIndex: nil,
                                 hoveredSubIndex: 0,
                                 showTitles: true)
@@ -131,34 +132,138 @@ struct QuickSlotsTab: View {
                     .fill(Color.primary.opacity(0.05))
             )
 
-            VStack(spacing: 10) {
-                ForEach(0..<4, id: \.self) { i in
-                    Picker("槽位 \(i + 1)", selection: slotBinding(i)) {
-                        Text("未使用").tag(UUID?.none)
-                        ForEach(store.settings.layouts) { item in
-                            Text(item.name).tag(UUID?.some(item.id))
-                        }
+            ScrollView {
+                VStack(spacing: 10) {
+                    ForEach(Array(store.settings.groups.enumerated()), id: \.element.id) { index, group in
+                        GroupEditorCard(index: index, group: group)
                     }
                 }
             }
 
-            Spacer()
+            HStack {
+                Button {
+                    store.addGroup()
+                } label: {
+                    Label("添加组", systemImage: "plus")
+                }
+                Button {
+                    store.autoGroup()
+                } label: {
+                    Label("按互补自动分组", systemImage: "wand.and.stars")
+                }
+                Spacer()
+                Text("自动分组会按互补关系重建所有组，之后可自由调整")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(24)
     }
+}
 
-    private func slotBinding(_ index: Int) -> Binding<UUID?> {
-        Binding(
-            get: {
-                store.settings.quickSlotIDs.indices.contains(index)
-                    ? store.settings.quickSlotIDs[index] : nil
-            },
-            set: { value in
-                store.update { s in
-                    while s.quickSlotIDs.count < 4 { s.quickSlotIDs.append(nil) }
-                    s.quickSlotIDs[index] = value
+/// 单个组的编辑卡片：成员预览 + 排序/删除 + 布局库勾选（同一网格的布局才能进同一组）
+struct GroupEditorCard: View {
+    let index: Int
+    let group: QuickGroup
+
+    @EnvironmentObject var store: SettingsStore
+
+    private var members: [LayoutItem] {
+        group.layouts(in: store.settings.layouts)
+    }
+
+    /// 组内首个成员的网格（约束后续只能勾选同网格布局）
+    private var memberGrid: (x: Int, y: Int)? {
+        members.first.map { ($0.gridX, $0.gridY) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Text("组 \(index + 1)")
+                    .font(.headline)
+                Text(members.isEmpty ? "未选择布局" : members.map(\.name).joined(separator: "+"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                // 瓦片条顺序 = 组顺序
+                Button {
+                    store.moveGroup(id: group.id, delta: -1)
+                } label: {
+                    Image(systemName: "chevron.up")
                 }
-            })
+                .disabled(index == 0)
+                .help("上移")
+                Button {
+                    store.moveGroup(id: group.id, delta: 1)
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .disabled(index == store.settings.groups.count - 1)
+                .help("下移")
+                Button {
+                    store.deleteGroup(id: group.id)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .help("删除组")
+            }
+
+            if members.count > 1 {
+                TilePreview(tile: .group(members), hovered: false, activeIndex: nil)
+                    .frame(width: 96, height: 60)
+                    .help("瓦片预览：拖动悬停时按光标所在区域选择子布局")
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 6)], spacing: 6) {
+                ForEach(store.settings.layouts) { layout in
+                    chip(layout)
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+    }
+
+    private func chip(_ layout: LayoutItem) -> some View {
+        let selected = group.layoutIDs.contains(layout.id)
+        // 同组布局需同网格，否则瓦片内区域/命中无法对齐
+        let gridMismatch = memberGrid != nil
+            && (layout.gridX != memberGrid!.x || layout.gridY != memberGrid!.y)
+        let disabled = !selected && gridMismatch
+
+        return Button {
+            store.toggleLayout(layout.id, in: group)
+        } label: {
+            HStack(spacing: 5) {
+                LayoutPreviewView(item: layout)
+                    .frame(width: 30, height: 20)
+                Text(layout.name)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity)
+            .background(
+                Capsule().fill(selected ? Color.accentColor.opacity(0.85)
+                                        : Color.primary.opacity(0.06))
+            )
+            .overlay(
+                Capsule().strokeBorder(selected ? Color.clear : Color.primary.opacity(0.12),
+                                       lineWidth: 1)
+            )
+            .foregroundStyle(selected ? .white : .primary)
+            .opacity(disabled ? 0.35 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .help(disabled ? "网格尺寸（\(layout.gridX)×\(layout.gridY)）与本组（\(memberGrid!.x)×\(memberGrid!.y)）不同" : "")
     }
 }
 
@@ -197,8 +302,7 @@ struct TriggerTab: View {
 
             Section("瓦片条显示") {
                 Toggle("在预览瓦片上显示布局名称", isOn: titlesBinding)
-                Toggle("聚合显示互补布局", isOn: groupBinding)
-                Text("恰好平铺整个网格的布局（左半屏+右半屏、四个四分屏、三等分…）合并为一个瓦片；拖动悬停时在瓦片内移动光标选择子布局。")
+                Text("瓦片的分组与顺序在「快速布局」页配置。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -250,10 +354,6 @@ struct TriggerTab: View {
                 set: { v in store.update { $0.showTileTitles = v } })
     }
 
-    private var groupBinding: Binding<Bool> {
-        Binding(get: { store.settings.autoGroupLayouts },
-                set: { v in store.update { $0.autoGroupLayouts = v } })
-    }
 
     private var hotkeyBinding: Binding<HotKeyCombo?> {
         Binding(get: { store.settings.quickHotkey },

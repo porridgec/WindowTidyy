@@ -85,21 +85,32 @@ enum KeyCodeFormatter {
     }
 }
 
+/// 快速瓦片组：组内自选若干布局（建议同一网格尺寸），一个组在 overlay 里即一个瓦片；
+/// 组内多个布局时，拖动悬停按光标所在区域选择子布局。
+struct QuickGroup: Codable, Equatable, Identifiable {
+    var id = UUID()
+    /// 组内布局（引用布局库 id，顺序即瓦片内子布局顺序）
+    var layoutIDs: [UUID] = []
+
+    /// 组内实际布局（过滤已删除引用）
+    func layouts(in library: [LayoutItem]) -> [LayoutItem] {
+        layoutIDs.compactMap { id in library.first(where: { $0.id == id }) }
+    }
+}
+
 struct AppSettings: Codable, Equatable {
     /// 总开关
     var enabled = true
     /// 布局库
     var layouts = LayoutItem.defaults
-    /// 4 个快速槽位（引用布局库 id，nil = 未使用）
-    var quickSlotIDs: [UUID?] = []
+    /// 快速瓦片组（一个组 = 一个 overlay 瓦片；替代旧版固定 4 槽位）
+    var groups: [QuickGroup] = []
     /// 触发方式
     var triggerMode = TriggerMode.modifier
     /// 触发修饰键掩码（NSEvent.ModifierFlags 设备无关位），默认 Option
     var triggerModifierMask: UInt = NSEvent.ModifierFlags.option.deviceIndependentRawValue
     /// 瓦片上是否显示布局名称
     var showTileTitles = true
-    /// 聚合显示互补布局（原版 AutoGroupLayouts）：左右半屏、四分屏等合并为一个瓦片
-    var autoGroupLayouts = true
     // Quick Layout 网格直选
     var quickGridX = 6
     var quickGridY = 6
@@ -107,37 +118,53 @@ struct AppSettings: Codable, Equatable {
                                                 modifiers: UInt32(controlKey | optionKey))
 
     init() {
-        quickSlotIDs = layouts.map { $0.id }
+        groups = layouts.map { QuickGroup(layoutIDs: [$0.id]) }
     }
 
     // 自定义解码：容忍旧版本配置缺字段
     enum CodingKeys: String, CodingKey {
-        case enabled, layouts, quickSlotIDs, triggerMode, triggerModifierMask
-        case showTileTitles, autoGroupLayouts, quickGridX, quickGridY, quickHotkey
+        case enabled, layouts, groups, triggerMode, triggerModifierMask
+        case showTileTitles, quickGridX, quickGridY, quickHotkey
+    }
+
+    /// 旧版（固定 4 槽位）字段，仅用于迁移读取
+    private enum LegacyKeys: String, CodingKey {
+        case quickSlotIDs
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         layouts = try c.decodeIfPresent([LayoutItem].self, forKey: .layouts) ?? LayoutItem.defaults
-        quickSlotIDs = try c.decodeIfPresent([UUID?].self, forKey: .quickSlotIDs) ?? layouts.map { $0.id }
         triggerMode = try c.decodeIfPresent(TriggerMode.self, forKey: .triggerMode) ?? .modifier
         triggerModifierMask = try c.decodeIfPresent(UInt.self, forKey: .triggerModifierMask)
             ?? NSEvent.ModifierFlags.option.deviceIndependentRawValue
         showTileTitles = try c.decodeIfPresent(Bool.self, forKey: .showTileTitles) ?? true
-        autoGroupLayouts = try c.decodeIfPresent(Bool.self, forKey: .autoGroupLayouts) ?? true
         quickGridX = try c.decodeIfPresent(Int.self, forKey: .quickGridX) ?? 6
         quickGridY = try c.decodeIfPresent(Int.self, forKey: .quickGridY) ?? 6
         quickHotkey = try c.decodeIfPresent(HotKeyCombo.self, forKey: .quickHotkey)
             ?? HotKeyCombo(keyCode: UInt32(kVK_ANSI_G), modifiers: UInt32(controlKey | optionKey))
-        repairQuickSlots()
+
+        if let loaded = try c.decodeIfPresent([QuickGroup].self, forKey: .groups) {
+            groups = loaded
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            if let legacySlots = try legacy.decodeIfPresent([UUID?].self, forKey: .quickSlotIDs) {
+                // 旧版（固定 4 槽位）迁移：每个非空槽位 → 单成员组
+                groups = legacySlots.compactMap { $0 }.map { QuickGroup(layoutIDs: [$0]) }
+            } else {
+                groups = layouts.map { QuickGroup(layoutIDs: [$0.id]) }
+            }
+        }
+        repairGroups()
     }
 
-    /// 清理引用了已删除布局的槽位
-    mutating func repairQuickSlots() {
-        quickSlotIDs = quickSlotIDs.map { id in
-            guard let id, layouts.contains(where: { $0.id == id }) else { return nil }
-            return id
+    /// 清理引用了已删除布局的组成员
+    mutating func repairGroups() {
+        for i in groups.indices {
+            groups[i].layoutIDs = groups[i].layoutIDs.filter { id in
+                layouts.contains(where: { $0.id == id })
+            }
         }
     }
 }
@@ -181,25 +208,20 @@ final class SettingsStore: ObservableObject {
     func update(_ mutate: (inout AppSettings) -> Void) {
         var s = settings
         mutate(&s)
-        s.repairQuickSlots()
+        s.repairGroups()
         settings = s
     }
 
-    /// overlay 实际显示的瓦片（应用聚合设置）
-    var overlayTiles: [OverlayTile] {
-        let layouts = quickLayouts
-        return settings.autoGroupLayouts
-            ? LayoutGrouping.overlayTiles(from: layouts)
-            : layouts.map { OverlayTile.single($0) }
-    }
-
-    /// 槽位实际生效的布局（按槽位顺序，跳过未使用）
-    var quickLayouts: [LayoutItem] {
-        settings.quickSlotIDs.compactMap { id in
-            guard let id else { return nil }
-            return settings.layouts.first(where: { $0.id == id })
+    /// overlay 实际显示的瓦片：一个组 → 一个瓦片（空组跳过）
+    var quickTiles: [OverlayTile] {
+        settings.groups.compactMap { group in
+            let members = group.layouts(in: settings.layouts)
+            if members.isEmpty { return nil }
+            return members.count == 1 ? .single(members[0]) : .group(members)
         }
     }
+
+    // MARK: - 布局库
 
     func addLayout() {
         update { s in
@@ -221,6 +243,46 @@ final class SettingsStore: ObservableObject {
             copy.id = UUID()
             copy.name += " 副本"
             s.layouts.insert(copy, at: idx + 1)
+        }
+    }
+
+    // MARK: - 快速组
+
+    func addGroup() {
+        update { $0.groups.append(QuickGroup(layoutIDs: [])) }
+    }
+
+    func deleteGroup(id: UUID) {
+        update { $0.groups.removeAll(where: { $0.id == id }) }
+    }
+
+    /// 组排序（瓦片条顺序）
+    func moveGroup(id: UUID, delta: Int) {
+        update { s in
+            guard let idx = s.groups.firstIndex(where: { $0.id == id }) else { return }
+            let target = idx + delta
+            guard s.groups.indices.contains(target) else { return }
+            s.groups.swapAt(idx, target)
+        }
+    }
+
+    /// 组内布局勾选
+    func toggleLayout(_ layoutID: UUID, in group: QuickGroup) {
+        update { s in
+            guard let idx = s.groups.firstIndex(where: { $0.id == group.id }) else { return }
+            if let memberIdx = s.groups[idx].layoutIDs.firstIndex(of: layoutID) {
+                s.groups[idx].layoutIDs.remove(at: memberIdx)
+            } else {
+                s.groups[idx].layoutIDs.append(layoutID)
+            }
+        }
+    }
+
+    /// 一键按互补自动分组（替换现有分组；互补算法仅为初始建议，之后完全手动可控）
+    func autoGroup() {
+        update { s in
+            let tiles = LayoutGrouping.overlayTiles(from: s.layouts)
+            s.groups = tiles.map { QuickGroup(layoutIDs: $0.layouts.map(\.id)) }
         }
     }
 

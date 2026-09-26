@@ -65,22 +65,41 @@ final class LayoutItemTests: XCTestCase {
         var settings = AppSettings()
         settings.triggerMode = .anyDrag
         settings.showTileTitles = false
-        let item = LayoutItem(name: "自定义", gridX: 8, gridY: 4, startX: 1, startY: 1, endX: 7, endY: 3)
-        settings.layouts.append(item)
-        settings.quickSlotIDs = [item.id, nil, nil, nil]
+        let left = LayoutItem(name: "左半", gridX: 6, gridY: 6, startX: 0, startY: 0, endX: 3, endY: 6)
+        let right = LayoutItem(name: "右半", gridX: 6, gridY: 6, startX: 3, startY: 0, endX: 6, endY: 6)
+        settings.layouts.append(contentsOf: [left, right])
+        settings.groups = [QuickGroup(layoutIDs: [left.id, right.id]),
+                           QuickGroup(layoutIDs: [settings.layouts[2].id])]
 
         let data = try JSONEncoder().encode(settings)
         let decoded = try JSONDecoder().decode(AppSettings.self, from: data)
         XCTAssertEqual(decoded, settings)
-        XCTAssertEqual(decoded.quickSlotIDs.count, 4)
+        XCTAssertEqual(decoded.groups.count, 2)
     }
 
-    func testRepairSlotsDropsDeletedLayouts() {
+    func testLegacySlotsMigrateToGroups() throws {
+        // 旧版固定 4 槽位（含空槽）→ 非空槽位各成一个单成员组
+        let defaults = LayoutItem.defaults
+        let layoutsJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Array(defaults[0...1])))
+        let dict: [String: Any] = [
+            "layouts": layoutsJSON,
+            "quickSlotIDs": [defaults[0].id.uuidString, NSNull(), defaults[1].id.uuidString],
+        ]
+        let json = try JSONSerialization.data(withJSONObject: dict)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: json)
+        XCTAssertEqual(decoded.groups.map { $0.layoutIDs }, [[defaults[0].id], [defaults[1].id]])
+    }
+
+    func testRepairGroupsDropsDeletedLayouts() {
         var settings = AppSettings()
         let removed = settings.layouts[1].id
+        let kept = settings.layouts[0].id
+        settings.groups = [QuickGroup(layoutIDs: [kept, removed]),
+                           QuickGroup(layoutIDs: [removed])]
         settings.layouts.remove(at: 1)
-        settings.repairQuickSlots()
-        XCTAssertFalse(settings.quickSlotIDs.contains(removed))
+        settings.repairGroups()
+        XCTAssertEqual(settings.groups[0].layoutIDs, [kept])
+        XCTAssertTrue(settings.groups[1].layoutIDs.isEmpty)
     }
 
     func testFullCoverageDetection() {
