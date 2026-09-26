@@ -14,6 +14,8 @@ enum TileStyle {
     /// 网格线：比边框更淡的浅白
     static let gridLine = Color.white.opacity(0.28)
     static let gridLineActive = Color.white.opacity(0.55)
+    /// 区域内分割线：浅色填充块之间用深色细线分割（叠在填充之上、裁剪到区域范围）
+    static let zoneDivider = Color(red: 0.07, green: 0.09, blue: 0.12).opacity(0.6)
     /// 边框
     static let border = Color.white.opacity(0.35)
     static let borderActive = Color.white.opacity(0.8)
@@ -105,21 +107,33 @@ struct TilePreview: View {
             let cw = geo.size.width / CGFloat(cols)
             let ch = geo.size.height / CGFloat(rows)
 
-            ZStack(alignment: .topLeading) {
-                // 网格线
-                Path { path in
-                    for c in 1..<max(cols, 1) {
-                        let x = cw * CGFloat(c)
-                        path.move(to: CGPoint(x: x, y: 0))
-                        path.addLine(to: CGPoint(x: x, y: geo.size.height))
-                    }
-                    for r in 1..<max(rows, 1) {
-                        let y = ch * CGFloat(r)
-                        path.move(to: CGPoint(x: 0, y: y))
-                        path.addLine(to: CGPoint(x: geo.size.width, y: y))
-                    }
+            // 浅色网格线（铺满整格）
+            let gridLines = Path { path in
+                for c in 1..<max(cols, 1) {
+                    let x = cw * CGFloat(c)
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: geo.size.height))
                 }
-                .stroke(hovered ? TileStyle.gridLineActive : TileStyle.gridLine, lineWidth: 1)
+                for r in 1..<max(rows, 1) {
+                    let y = ch * CGFloat(r)
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: geo.size.width, y: y))
+                }
+            }
+            // 区域并集（作为区域内分割线的蒙版）
+            let zoneUnion = Path { path in
+                for layout in tile.layouts where layout.isValid {
+                    let rect = CGRect(x: cw * CGFloat(layout.startX),
+                                      y: ch * CGFloat(layout.startY),
+                                      width: cw * CGFloat(layout.endX - layout.startX),
+                                      height: ch * CGFloat(layout.endY - layout.startY))
+                    path.addRect(rect)
+                }
+            }
+
+            ZStack(alignment: .topLeading) {
+                gridLines
+                    .stroke(hovered ? TileStyle.gridLineActive : TileStyle.gridLine, lineWidth: 1)
 
                 // 各子布局区域（统一色）
                 ForEach(Array(tile.layouts.enumerated()), id: \.element.id) { index, layout in
@@ -131,6 +145,11 @@ struct TilePreview: View {
                         .frame(width: w, height: h)
                         .offset(x: cw * CGFloat(layout.startX), y: ch * CGFloat(layout.startY))
                 }
+
+                // 区域内分割线：浅色块（含激活块）之间/内部始终可见的深色细线
+                gridLines
+                    .stroke(TileStyle.zoneDivider, lineWidth: 1)
+                    .mask(zoneUnion.fill())
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
