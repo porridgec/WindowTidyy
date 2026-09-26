@@ -215,7 +215,16 @@ struct GroupEditorCard: View {
 
             if members.count > 1 {
                 TilePreview(tile: .group(members), hovered: false, activeIndex: nil)
-                    .frame(width: 96, height: 60)
+                    .frame(width: 108, height: 62)
+                    .padding(6)
+                    .background(
+                        RoundedRectangle(cornerRadius: TileStyle.cornerRadius, style: .continuous)
+                            .fill(TileStyle.background.opacity(TileStyle.backgroundOpacity))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: TileStyle.cornerRadius, style: .continuous)
+                            .strokeBorder(TileStyle.border, lineWidth: 1)
+                    )
                     .help("瓦片预览：拖动悬停时按光标所在区域选择子布局")
             }
 
@@ -462,20 +471,20 @@ struct StripPositionEditor: View {
 
     private func miniStrip(count: Int) -> some View {
         let tiles = max(min(count, 8), 1)
-        return HStack(spacing: 3) {
+        return HStack(spacing: 2) {
             ForEach(0..<tiles, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.accentColor.opacity(0.75))
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.white.opacity(0.32))
             }
         }
-        .padding(4)
+        .padding(3)
         .background(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(.regularMaterial)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(TileStyle.background.opacity(0.85))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.2), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(TileStyle.border, lineWidth: 1)
         )
     }
 }

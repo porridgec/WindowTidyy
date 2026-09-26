@@ -1,6 +1,26 @@
 import SwiftUI
 
-/// 顶部瓦片条：若干布局瓦片并排（聚合组为一个多区域瓦片），悬停高亮
+/// 瓦片视觉规格（复刻原版 Window Tidy：HUD 深灰蓝 + 系统蓝高亮 + 独立分散瓦片）
+enum TileStyle {
+    /// 原版瓦片底色 #2a3540（深灰蓝 HUD）
+    static let background = Color(red: 0.165, green: 0.208, blue: 0.251)
+    static let backgroundOpacity = 0.78
+    /// 原版悬停高亮 #4a90d9（系统蓝）
+    static let activeBackground = Color(red: 0.29, green: 0.565, blue: 0.851)
+    static let activeBackgroundOpacity = 0.92
+    /// 区域填充：统一单色，激活区实白、其余半透白（原版无多色）
+    static let zoneFill = Color.white.opacity(0.32)
+    static let zoneActiveFill = Color.white.opacity(0.95)
+    /// 网格线：比边框更淡的浅白
+    static let gridLine = Color.white.opacity(0.28)
+    static let gridLineActive = Color.white.opacity(0.55)
+    /// 边框
+    static let border = Color.white.opacity(0.35)
+    static let borderActive = Color.white.opacity(0.8)
+    static let cornerRadius: CGFloat = 8
+}
+
+/// 顶部瓦片条：各瓦片独立分散（无共享容器框，与原版一致）
 struct StripView: View {
     @ObservedObject var store: StripStore
 
@@ -9,15 +29,6 @@ struct StripView: View {
                     hoveredIndex: store.hoveredIndex,
                     hoveredSubIndex: store.hoveredSubIndex,
                     showTitles: store.showTitles)
-            .padding(OverlayMetrics.padding)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-            )
     }
 }
 
@@ -47,34 +58,39 @@ struct TileView: View {
     let showTitle: Bool
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 3) {
             TilePreview(tile: tile, hovered: hovered, activeIndex: hovered ? hoveredSubIndex : nil)
                 .frame(maxWidth: .infinity)
-                .frame(height: showTitle ? 50 : 66)
+                .frame(height: showTitle ? 58 : 74)
             if showTitle {
                 Text(tile.title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(hovered ? 1.0 : 0.85))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .padding(.horizontal, 2)
             }
         }
-        .padding(8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .frame(width: OverlayMetrics.tileWidth, height: OverlayMetrics.tileHeight)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(hovered ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary.opacity(0.05)))
+            RoundedRectangle(cornerRadius: TileStyle.cornerRadius, style: .continuous)
+                .fill(hovered
+                      ? TileStyle.activeBackground.opacity(TileStyle.activeBackgroundOpacity)
+                      : TileStyle.background.opacity(TileStyle.backgroundOpacity))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(hovered ? Color.clear : Color.primary.opacity(0.18), lineWidth: 1)
+            RoundedRectangle(cornerRadius: TileStyle.cornerRadius, style: .continuous)
+                .strokeBorder(hovered ? TileStyle.borderActive : TileStyle.border, lineWidth: 1)
         )
-        .foregroundStyle(hovered ? .white : .primary)
-        .scaleEffect(hovered ? 1.04 : 1)
+        .scaleEffect(hovered ? 1.05 : 1)
         .animation(.easeOut(duration: 0.08), value: hovered)
     }
 }
 
-/// 瓦片内的网格预览：单布局高亮一块区域；聚合组绘制所有子区域，激活的子区域最亮
+/// 瓦片内的网格预览：所有区域统一单色填充、浅色网格线分割（原版风格，无多色）；
+/// 激活子区域为实白高亮
 struct TilePreview: View {
     let tile: OverlayTile
     let hovered: Bool
@@ -103,32 +119,21 @@ struct TilePreview: View {
                         path.addLine(to: CGPoint(x: geo.size.width, y: y))
                     }
                 }
-                .stroke(lineColor, lineWidth: 1)
+                .stroke(hovered ? TileStyle.gridLineActive : TileStyle.gridLine, lineWidth: 1)
 
-                // 各子布局区域
+                // 各子布局区域（统一色）
                 ForEach(Array(tile.layouts.enumerated()), id: \.element.id) { index, layout in
                     let isActive = hovered && activeIndex == index
                     let w = cw * CGFloat(layout.endX - layout.startX)
                     let h = ch * CGFloat(layout.endY - layout.startY)
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(isActive ? Color.white.opacity(0.95)
-                              : (hovered ? Color.white.opacity(0.35) : fillColor(for: index)))
+                        .fill(isActive ? TileStyle.zoneActiveFill : TileStyle.zoneFill)
                         .frame(width: w, height: h)
                         .offset(x: cw * CGFloat(layout.startX), y: ch * CGFloat(layout.startY))
                 }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-    }
-
-    private var lineColor: Color {
-        hovered ? Color.white.opacity(0.55) : Color.primary.opacity(0.22)
-    }
-
-    /// 聚合组内不同子区域用不同色相区分（未悬停时）
-    private func fillColor(for index: Int) -> Color {
-        let bases: [Color] = [.accentColor, .orange, .teal, .indigo, .pink, .green]
-        return bases[index % bases.count].opacity(0.5)
     }
 }
 

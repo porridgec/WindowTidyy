@@ -255,15 +255,15 @@ final class LayoutGroupingTests: XCTestCase {
 // MARK: - 瓦片条位置
 
 final class StripPositionTests: XCTestCase {
-    // 屏幕铺放区域 (0,0,1000,1000)，4 瓦片 → 条宽 482、高 106
+    // 屏幕铺放区域 (0,0,1000,1000)，4 瓦片 → 条宽 696、高 104（瓦片 128×88、间距 56）
     private let bounds = CGRect(x: 0, y: 0, width: 1000, height: 1000)
 
     func testTopCenterDefault() {
         let r = OverlayMetrics.stripRect(in: bounds, tileCount: 4, position: CGPoint(x: 0.5, y: 0.06))
         XCTAssertEqual(r.midX, 500, accuracy: 0.5)
-        XCTAssertEqual(bounds.maxY - r.maxY, 60 - 53, accuracy: 0.5) // 中心距顶 6% → 顶边距 60-53=7
-        XCTAssertEqual(r.width, 482)
-        XCTAssertEqual(r.height, 106)
+        XCTAssertEqual(bounds.maxY - r.maxY, 8, accuracy: 0.5) // 中心距顶 6%(60) - 半高(52)
+        XCTAssertEqual(r.width, 696)
+        XCTAssertEqual(r.height, 104)
     }
 
     func testClampsAtEdges() {
