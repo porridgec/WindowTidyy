@@ -5,3 +5,4 @@ DerivedData/
 *.xcuserdata
 .zcode/
 signing.env
+screenshots/overlay_hover.png
