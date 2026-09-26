@@ -132,6 +132,8 @@ struct QuickSlotsTab: View {
                     .fill(Color.primary.opacity(0.05))
             )
 
+            StripPositionEditor()
+
             ScrollView {
                 VStack(spacing: 10) {
                     ForEach(Array(store.settings.groups.enumerated()), id: \.element.id) { index, group in
@@ -377,5 +379,103 @@ struct TriggerTab: View {
                 }
             }))
         .toggleStyle(.button)
+    }
+}
+
+
+/// 瓦片条位置编辑：模拟屏幕的预览画布，自由拖动迷你瓦片条（原版 PositionPreviewView 的自由拖动版）
+struct StripPositionEditor: View {
+    @EnvironmentObject var store: SettingsStore
+
+    /// 迷你瓦片条相对画布的宽度比例（按 1800pt 宽屏幕估算）
+    private var stripWidthRatio: CGFloat {
+        min(max(OverlayMetrics.stripWidth(tileCount: max(store.quickTiles.count, 1)) / 1800.0, 0.12), 0.9)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("瓦片条显示位置")
+                .font(.headline)
+            Text("拖动画布中的瓦片条调整其出现位置（拖动窗口时按此位置显示）")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            GeometryReader { geo in
+                let sw = geo.size.width * stripWidthRatio
+                let sh = sw * (OverlayMetrics.stripHeight / max(OverlayMetrics.stripWidth(tileCount: max(store.quickTiles.count, 1)), 1))
+
+                ZStack(alignment: .topLeading) {
+                    // 屏幕画布
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+                        )
+
+                    // 迷你瓦片条（按当前组数画小方块）
+                    miniStrip(count: store.quickTiles.count)
+                        .frame(width: sw, height: sh)
+                        .offset(x: min(max(geo.size.width * pos.x - sw / 2, 0), geo.size.width - sw),
+                                y: min(max(geo.size.height * pos.y - sh / 2, 0), geo.size.height - sh))
+                        .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let cx = min(max(value.location.x, sw / 2), geo.size.width - sw / 2)
+                            let cy = min(max(value.location.y, sh / 2), geo.size.height - sh / 2)
+                            store.update { s in
+                                s.stripPositionX = Double(cx / geo.size.width)
+                                s.stripPositionY = Double(cy / geo.size.height)
+                            }
+                        }
+                )
+            }
+            .aspectRatio(1.6, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+
+            HStack {
+                Text(String(format: "水平 %.0f%% · 距顶部 %.0f%%", pos.x * 100, pos.y * 100))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("重置到顶部居中") {
+                    store.update { s in
+                        s.stripPositionX = 0.5
+                        s.stripPositionY = 0.06
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+    }
+
+    private var pos: CGPoint {
+        CGPoint(x: store.settings.stripPositionX, y: store.settings.stripPositionY)
+    }
+
+    private func miniStrip(count: Int) -> some View {
+        let tiles = max(min(count, 8), 1)
+        return HStack(spacing: 3) {
+            ForEach(0..<tiles, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.accentColor.opacity(0.75))
+            }
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(.regularMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.2), lineWidth: 1)
+        )
     }
 }

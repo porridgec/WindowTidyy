@@ -111,6 +111,10 @@ struct AppSettings: Codable, Equatable {
     var triggerModifierMask: UInt = NSEvent.ModifierFlags.option.deviceIndependentRawValue
     /// 瓦片上是否显示布局名称
     var showTileTitles = true
+    /// 瓦片条出现位置：中心点在屏幕铺放区域内的归一化坐标（y 从顶部算）；
+    /// 默认顶部居中（约 0.5, 0.06），可在设置的预览画布中自由拖动
+    var stripPositionX = 0.5
+    var stripPositionY = 0.06
     // Quick Layout 网格直选
     var quickGridX = 6
     var quickGridY = 6
@@ -124,7 +128,7 @@ struct AppSettings: Codable, Equatable {
     // 自定义解码：容忍旧版本配置缺字段
     enum CodingKeys: String, CodingKey {
         case enabled, layouts, groups, triggerMode, triggerModifierMask
-        case showTileTitles, quickGridX, quickGridY, quickHotkey
+        case showTileTitles, stripPositionX, stripPositionY, quickGridX, quickGridY, quickHotkey
     }
 
     /// 旧版（固定 4 槽位）字段，仅用于迁移读取
@@ -140,6 +144,8 @@ struct AppSettings: Codable, Equatable {
         triggerModifierMask = try c.decodeIfPresent(UInt.self, forKey: .triggerModifierMask)
             ?? NSEvent.ModifierFlags.option.deviceIndependentRawValue
         showTileTitles = try c.decodeIfPresent(Bool.self, forKey: .showTileTitles) ?? true
+        stripPositionX = try c.decodeIfPresent(Double.self, forKey: .stripPositionX) ?? 0.5
+        stripPositionY = try c.decodeIfPresent(Double.self, forKey: .stripPositionY) ?? 0.06
         quickGridX = try c.decodeIfPresent(Int.self, forKey: .quickGridX) ?? 6
         quickGridY = try c.decodeIfPresent(Int.self, forKey: .quickGridY) ?? 6
         quickHotkey = try c.decodeIfPresent(HotKeyCombo.self, forKey: .quickHotkey)

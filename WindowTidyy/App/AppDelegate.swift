@@ -39,9 +39,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func wireMonitor() {
         dragMonitor.onActivate = { [weak self] _, cursor in
             guard let self else { return }
+            let s = self.store.settings
             self.overlay.show(tiles: self.store.quickTiles,
                               cursorCG: cursor,
-                              showTitles: self.store.settings.showTileTitles)
+                              showTitles: s.showTileTitles,
+                              position: CGPoint(x: s.stripPositionX, y: s.stripPositionY))
         }
         dragMonitor.onDragUpdate = { [weak self] cursor in
             self?.overlay.updateHover(cursorCG: cursor)

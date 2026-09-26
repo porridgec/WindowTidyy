@@ -12,6 +12,17 @@ enum OverlayMetrics {
     static func stripWidth(tileCount: Int) -> CGFloat {
         CGFloat(tileCount) * tileWidth + CGFloat(max(tileCount - 1, 0)) * spacing + padding * 2
     }
+
+    /// 依据归一化位置（中心点，y 从顶部算，相对 bounds）计算瓦片条矩形，
+    /// 自动夹紧保证完整可见。设置页的预览画布与 overlay 共用此逻辑。
+    static func stripRect(in bounds: CGRect, tileCount: Int, position: CGPoint) -> NSRect {
+        let size = NSSize(width: stripWidth(tileCount: tileCount), height: stripHeight)
+        let cx = bounds.minX + bounds.width * position.x
+        let yTopFromBounds = bounds.height * position.y
+        let x = min(max(cx - size.width / 2, bounds.minX), bounds.maxX - size.width)
+        let yTop = min(max(yTopFromBounds - size.height / 2, 0), bounds.height - size.height)
+        return NSRect(x: x, y: bounds.maxY - yTop - size.height, width: size.width, height: size.height)
+    }
 }
 
 /// overlay 状态（SwiftUI 观察）
@@ -49,11 +60,13 @@ final class OverlayController {
     private(set) var tiles: [OverlayTile] = []
     private(set) var tileRects: [NSRect] = [] // AppKit 屏幕坐标
     private(set) var screen: NSScreen?
+    private var position = CGPoint(x: 0.5, y: 0.06)
     private var visible = false
 
     // MARK: - 显示 / 更新 / 隐藏
 
-    func show(tiles: [OverlayTile], cursorCG: CGPoint, showTitles: Bool) {
+    func show(tiles: [OverlayTile], cursorCG: CGPoint, showTitles: Bool,
+              position: CGPoint = CGPoint(x: 0.5, y: 0.06)) {
         hide()
         guard let scr = ScreenMath.screen(containingCG: cursorCG) ?? NSScreen.main,
               !tiles.isEmpty else {
@@ -63,15 +76,14 @@ final class OverlayController {
         WTLog.log("WTDBG [overlay] show on \(scr.localizedName) tiles=\(tiles.map(\.title))")
 
         self.tiles = tiles
-        screen = scr
+        self.screen = scr
+        self.position = position
         visible = true
 
-        // 顶部居中条带（visibleFrame 顶部下方留 12pt）
-        let size = NSSize(width: OverlayMetrics.stripWidth(tileCount: tiles.count),
-                          height: OverlayMetrics.stripHeight)
-        let stripRect = NSRect(x: scr.visibleFrame.midX - size.width / 2,
-                               y: scr.visibleFrame.maxY - size.height - 12,
-                               width: size.width, height: size.height)
+        // 瓦片条位置：设置的预览画布可调（归一化中心点，相对屏幕铺放区域）
+        let stripRect = OverlayMetrics.stripRect(in: scr.tilingBounds,
+                                                 tileCount: tiles.count,
+                                                 position: position)
 
         let strip = makePanel(rect: stripRect)
         strip.level = .modalPanel
@@ -109,7 +121,8 @@ final class OverlayController {
         let p = ScreenMath.appKitPoint(fromCG: cursorCG)
         if let scr = screen, !NSPointInRect(p, scr.frame),
            ScreenMath.screen(containingCG: cursorCG) != nil {
-            show(tiles: tiles, cursorCG: cursorCG, showTitles: store?.showTitles ?? true)
+            show(tiles: tiles, cursorCG: cursorCG,
+                 showTitles: store?.showTitles ?? true, position: position)
             return
         }
         guard let idx = tileRects.firstIndex(where: { NSPointInRect(p, $0) }), idx < tiles.count else {

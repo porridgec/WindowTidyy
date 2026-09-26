@@ -251,3 +251,43 @@ final class LayoutGroupingTests: XCTestCase {
         XCTAssertEqual(group.grid.y, 6)
     }
 }
+
+// MARK: - 瓦片条位置
+
+final class StripPositionTests: XCTestCase {
+    // 屏幕铺放区域 (0,0,1000,1000)，4 瓦片 → 条宽 482、高 106
+    private let bounds = CGRect(x: 0, y: 0, width: 1000, height: 1000)
+
+    func testTopCenterDefault() {
+        let r = OverlayMetrics.stripRect(in: bounds, tileCount: 4, position: CGPoint(x: 0.5, y: 0.06))
+        XCTAssertEqual(r.midX, 500, accuracy: 0.5)
+        XCTAssertEqual(bounds.maxY - r.maxY, 60 - 53, accuracy: 0.5) // 中心距顶 6% → 顶边距 60-53=7
+        XCTAssertEqual(r.width, 482)
+        XCTAssertEqual(r.height, 106)
+    }
+
+    func testClampsAtEdges() {
+        // 位置拖到 (0,0)（左上角）→ 夹紧为完全可见
+        let r = OverlayMetrics.stripRect(in: bounds, tileCount: 4, position: CGPoint(x: 0, y: 0))
+        XCTAssertEqual(r.minX, 0)
+        XCTAssertEqual(bounds.maxY - r.maxY, 0)
+        // 右下角
+        let r2 = OverlayMetrics.stripRect(in: bounds, tileCount: 4, position: CGPoint(x: 1, y: 1))
+        XCTAssertEqual(r2.maxX, 1000)
+        XCTAssertEqual(r2.minY, 0)
+    }
+
+    func testCenterPosition() {
+        let r = OverlayMetrics.stripRect(in: bounds, tileCount: 4, position: CGPoint(x: 0.5, y: 0.5))
+        XCTAssertEqual(r.midY, 500, accuracy: 0.5)
+    }
+
+    func testOffscreenOriginBounds() {
+        // 铺放区域不在原点时（副屏）：坐标基于 bounds
+        let b2 = CGRect(x: -1800, y: 381, width: 1800, height: 1131)
+        let r = OverlayMetrics.stripRect(in: b2, tileCount: 4, position: CGPoint(x: 0.5, y: 0.06))
+        XCTAssertEqual(r.midX, -900, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(r.minX, b2.minX)
+        XCTAssertLessThanOrEqual(r.maxX, b2.maxX)
+    }
+}
