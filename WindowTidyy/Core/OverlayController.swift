@@ -67,7 +67,8 @@ final class OverlayController {
     // MARK: - 显示 / 更新 / 隐藏
 
     func show(tiles: [OverlayTile], cursorCG: CGPoint, showTitles: Bool,
-              position: CGPoint = CGPoint(x: 0.5, y: 0.06)) {
+              position: CGPoint = CGPoint(x: 0.5, y: 0.06),
+              simulateHover: Bool = false) {
         hide()
         guard let scr = ScreenMath.screen(containingCG: cursorCG) ?? NSScreen.main,
               !tiles.isEmpty else {
@@ -114,6 +115,11 @@ final class OverlayController {
             x += OverlayMetrics.tileWidth + OverlayMetrics.spacing
         }
         updateHover(cursorCG: cursorCG)
+        if simulateHover {
+            // 演示/截图：模拟悬停第一个瓦片（含落区预览）
+            store?.hoveredIndex = tiles.isEmpty ? nil : 0
+            store?.hoveredSubIndex = 0
+        }
     }
 
     /// 拖动中光标移动：命中测试（瓦片 + 聚合瓦片内子区域）+ 必要时换屏

@@ -4,6 +4,14 @@
 
 [![Swift](https://img.shields.io/badge/Swift-5-F05138)]() [![macOS](https://img.shields.io/badge/macOS-14%2B-000000)]() [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
+拖动任意窗口：屏幕上按你设置的位置出现布局瓦片条，把窗口拖到目标瓦片上松手即可吸附（图中左半屏落区高亮，瓦片条位于底部——位置可自定义）：
+
+![拖动窗口时出现瓦片条，落区高亮](screenshots/overlay_zone.png)
+
+| 布局库（网格画布编辑器） | 快速布局（自定义组 + 位置画布） | 触发与显示 |
+|---|---|---|
+| ![布局库](screenshots/settings_layout.png) | ![快速布局](screenshots/settings_quick.png) | ![触发与显示](screenshots/settings_trigger.png) |
+
 ## 功能
 
 - **布局编辑器**：模拟屏幕的网格画布（默认 6×6，可调 1–16），拖拽框选格子生成布局，与原版 Window Tidy 的数据模型完全一致

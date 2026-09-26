@@ -21,7 +21,7 @@ struct SettingsView: View {
             }
             .padding(12)
         }
-        .frame(minWidth: 820, minHeight: 580)
+        .frame(minWidth: 880, minHeight: 580)
     }
 }
 
@@ -110,7 +110,7 @@ struct QuickSlotsTab: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
-            // 模拟瓦片条（与拖动时的 overlay 完全一致）
+            // 模拟瓦片条（与拖动时的 overlay 完全一致；等比缩放适配窗口宽度）
             Group {
                 if store.quickTiles.isEmpty {
                     Text("暂无瓦片 — 点击下方「添加组」并在组内勾选布局")
@@ -119,18 +119,15 @@ struct QuickSlotsTab: View {
                         .frame(maxWidth: .infinity)
                         .padding()
                 } else {
-                    TileRowView(tiles: store.quickTiles,
-                                hoveredIndex: nil,
-                                hoveredSubIndex: 0,
-                                showTitles: true)
+                    ScaledTileRow(tiles: store.quickTiles, showTitles: true)
                 }
             }
-            .padding(OverlayMetrics.padding)
             .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.primary.opacity(0.05))
             )
+            .padding(.vertical, 6)
 
             StripPositionEditor()
 

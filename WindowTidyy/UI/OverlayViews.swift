@@ -30,6 +30,29 @@ struct StripView: View {
     }
 }
 
+/// 设置页里的瓦片条预览：按真实尺寸渲染后等比缩放到可用宽度
+/// （组多时瓦片条可能比窗口还宽，直接摆放会把页面布局撑爆）
+struct ScaledTileRow: View {
+    let tiles: [OverlayTile]
+    var showTitles: Bool = true
+
+    var body: some View {
+        GeometryReader { geo in
+            let intrinsic = OverlayMetrics.stripWidth(tileCount: max(tiles.count, 1))
+            let scale = min(1, geo.size.width / intrinsic)
+            TileRowView(tiles: tiles,
+                        hoveredIndex: nil,
+                        hoveredSubIndex: 0,
+                        showTitles: showTitles)
+                .padding(OverlayMetrics.padding)
+                .frame(width: intrinsic, height: OverlayMetrics.stripHeight)
+                .scaleEffect(scale, anchor: .center)
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+        .frame(height: OverlayMetrics.stripHeight)
+    }
+}
+
 /// 瓦片行（overlay 与设置中心的模拟条带复用）
 struct TileRowView: View {
     let tiles: [OverlayTile]

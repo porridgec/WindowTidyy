@@ -32,6 +32,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showSettings(nil)
         }
         registerHotkey()
+
+        // 截图/演示用启动参数（README 配图等）
+        let args = CommandLine.arguments
+        if args.contains("-openSettings") {
+            showSettings(nil)
+        }
+        if let idx = args.firstIndex(of: "-renderShots"), idx + 1 < args.count {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.renderMarketingShots(to: args[idx + 1])
+            }
+        }
+        if args.contains("-previewOverlay") || args.contains("-previewOverlayHover") {
+            let hover = args.contains("-previewOverlayHover")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                guard let self else { return }
+                let s = self.store.settings
+                self.overlay.show(tiles: self.store.quickTiles,
+                                  cursorCG: ScreenMath.cgPoint(fromAppKit: NSEvent.mouseLocation),
+                                  showTitles: s.showTileTitles,
+                                  position: CGPoint(x: s.stripPositionX, y: s.stripPositionY),
+                                  simulateHover: hover)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                    self?.overlay.hide()
+                }
+            }
+        }
     }
 
     // MARK: - 组件接线
@@ -188,12 +214,12 @@ final class SettingsWindowController {
     let window: NSWindow
 
     init() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 600),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 620),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered,
                           defer: false)
         window.title = "WindowTidyy 设置"
-        window.contentMinSize = NSSize(width: 820, height: 580)
+        window.contentMinSize = NSSize(width: 880, height: 580)
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView:
             SettingsView()
@@ -205,5 +231,146 @@ final class SettingsWindowController {
     func show() {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+}
+
+
+// MARK: - README 配图渲染（离屏合成，零屏幕捕获）
+
+extension AppDelegate {
+    /// 离屏渲染营销图：桌面壁纸为底 + 落区高亮 + 瓦片条（用户的自定义位置）。
+    /// 不截屏 —— 瓦片条与落区均用 ImageRenderer/矢量绘制合成，保证背景只有壁纸。
+    @MainActor
+    func renderMarketingShots(to dir: String) {
+        guard let screen = NSScreen.main else { return }
+        let size = screen.frame.size
+        let tiles = store.quickTiles
+        guard !tiles.isEmpty else { return }
+
+        // 1) 壁纸底图
+        let composite = NSImage(size: size)
+        composite.lockFocusFlipped(false)
+        if let url = NSWorkspace.shared.desktopImageURL(for: screen),
+           let wallpaper = NSImage(contentsOf: url) {
+            wallpaper.draw(in: NSRect(origin: .zero, size: size),
+                           from: .zero, operation: .copy, fraction: 1)
+        }
+
+        // 2) 菜单栏：落区从菜单栏下沿开始，合成图必须画出它（高度 = 屏幕 topInset）
+        let topInset = screen.frame.maxY - screen.visibleFrame.maxY
+        if topInset > 4 {
+            let barRenderer = ImageRenderer(content: MenuBarView()
+                .frame(width: size.width, height: topInset))
+            barRenderer.scale = 2
+            if let cg = barRenderer.cgImage {
+                let barImage = NSImage(cgImage: cg, size: NSSize(width: size.width, height: topInset))
+                barImage.draw(in: NSRect(x: 0, y: size.height - topInset, width: size.width, height: topInset))
+            }
+        }
+
+        // 3) 落区高亮：第一个瓦片的第一个子布局（左半屏，顶到菜单栏下沿）
+        let first = tiles[0].layouts[0]
+        let zoneRect = first.targetRect(on: screen)
+        NSColor.systemBlue.withAlphaComponent(0.16).setFill()
+        zoneRect.fill()
+        NSColor.systemBlue.withAlphaComponent(0.85).setStroke()
+        let zonePath = NSBezierPath(roundedRect: zoneRect.insetBy(dx: 1, dy: 1),
+                                    xRadius: 10, yRadius: 10)
+        zonePath.lineWidth = 3
+        zonePath.stroke()
+
+        // 4) 瓦片条：悬停第一个瓦片（第一个子区域激活），画在用户设置的位置
+        let store = StripStore(tiles: tiles, showTitles: store.settings.showTileTitles)
+        store.hoveredIndex = 0
+        store.hoveredSubIndex = 0
+        let stripW = OverlayMetrics.stripWidth(tileCount: tiles.count)
+        let stripRect = OverlayMetrics.stripRect(in: screen.tilingBounds,
+                                                 tileCount: tiles.count,
+                                                 position: CGPoint(x: self.store.settings.stripPositionX,
+                                                                   y: self.store.settings.stripPositionY))
+        let renderer = ImageRenderer(content: StripView(store: store)
+            .frame(width: stripW, height: OverlayMetrics.stripHeight))
+        renderer.scale = 2
+        if let cg = renderer.cgImage {
+            let stripImage = NSImage(cgImage: cg, size: NSSize(width: stripW,
+                                                               height: OverlayMetrics.stripHeight))
+            // stripRect 是条带矩形；瓦片行透明底直接叠加
+            stripImage.draw(in: stripRect)
+        }
+        composite.unlockFocus()
+
+        // 5) 落盘
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        savePNG(composite, to: URL(fileURLWithPath: dir).appendingPathComponent("overlay_zone.png"))
+
+        // 6) 特写：只渲染瓦片条（透明底 + 悬停态）
+        let closeupRenderer = ImageRenderer(content: StripView(store: store)
+            .frame(width: stripW, height: OverlayMetrics.stripHeight))
+        closeupRenderer.scale = 2
+        guard let closeupCG = closeupRenderer.cgImage else { return }
+        let img = NSImage(cgImage: closeupCG, size: NSSize(width: stripW, height: OverlayMetrics.stripHeight))
+        // 特写垫一层壁纸同款背景（取壁纸中心裁片），避免透明底在 README 深色模式下看不清
+        let closeup = NSImage(size: NSSize(width: stripW + 60, height: OverlayMetrics.stripHeight + 60))
+        closeup.lockFocusFlipped(false)
+        if let url = NSWorkspace.shared.desktopImageURL(for: screen),
+           let wallpaper = NSImage(contentsOf: url) {
+            // 从壁纸中心裁一块与画布同比例的区域，填充特写背景
+            let wpSize = wallpaper.size
+            let targetAspect = (stripW + 60) / (OverlayMetrics.stripHeight + 60)
+            var cropRect = CGRect(x: 0, y: 0, width: wpSize.width, height: wpSize.width / targetAspect)
+            if cropRect.height > wpSize.height {
+                cropRect = CGRect(x: 0, y: 0, width: wpSize.height * targetAspect, height: wpSize.height)
+            }
+            cropRect.origin = CGPoint(x: (wpSize.width - cropRect.width) / 2,
+                                      y: (wpSize.height - cropRect.height) / 2)
+            wallpaper.draw(in: NSRect(origin: .zero, size: closeup.size),
+                           from: cropRect, operation: .copy, fraction: 1)
+        }
+        img.draw(in: NSRect(x: 30, y: 30, width: stripW, height: OverlayMetrics.stripHeight))
+        closeup.unlockFocus()
+        savePNG(closeup, to: URL(fileURLWithPath: dir).appendingPathComponent("overlay_hover.png"))
+        WTLog.log("WTDBG [app] marketing shots rendered to \(dir)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// 模拟菜单栏（README 合成图用）：深色半透明底 + Finder 菜单 + 状态图标 + 时钟
+    fileprivate struct MenuBarView: View {
+        var body: some View {
+            HStack(spacing: 0) {
+                HStack(spacing: 16) {
+                    Image(systemName: "applelogo")
+                        .font(.system(size: 14, weight: .medium))
+                    Text("访达").fontWeight(.semibold)
+                    Group {
+                        Text("文件"); Text("编辑"); Text("显示"); Text("前往"); Text("窗口"); Text("帮助")
+                    }
+                    .foregroundStyle(.white.opacity(0.75))
+                }
+                .padding(.leading, 14)
+                Spacer()
+                HStack(spacing: 14) {
+                    Image(systemName: "battery.75percent")
+                    Image(systemName: "wifi")
+                    Image(systemName: "magnifyingglass")
+                    Image(systemName: "switch.2")
+                    Text("9月26日 周五 13:50")
+                }
+                .padding(.trailing, 16)
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(.white.opacity(0.95))
+            // 撑满外部 frame（38pt 画布），背景色覆盖整条——否则色块只裹住文字高度
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(red: 0.10, green: 0.10, blue: 0.12).opacity(0.55))
+        }
+    }
+
+    private func savePNG(_ image: NSImage, to url: URL) {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return }
+        try? png.write(to: url)
     }
 }
