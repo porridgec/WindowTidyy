@@ -5,9 +5,9 @@ import SwiftUI
 /// 瓦片条与瓦片的几何常量（控制器做命中测试、SwiftUI 画界面，两边必须一致）。
 /// 尺寸/间距复刻原版：瓦片 ~133×106，瓦片间大间距分散排列（无共享容器框）。
 enum OverlayMetrics {
-    static let tileWidth: CGFloat = 128
-    static let tileHeight: CGFloat = 88
-    static let spacing: CGFloat = 56
+    static let tileWidth: CGFloat = 168
+    static let tileHeight: CGFloat = 92
+    static let spacing: CGFloat = 72
     static let padding: CGFloat = 8
     static var stripHeight: CGFloat { tileHeight + padding * 2 }
     static func stripWidth(tileCount: Int) -> CGFloat {

@@ -1,25 +1,21 @@
 import SwiftUI
 
-/// 瓦片视觉规格（复刻原版 Window Tidy：HUD 深灰蓝 + 系统蓝高亮 + 独立分散瓦片）
+/// 瓦片视觉规格（按原版实拍复刻：深灰半透明 HUD 底 + 淡蓝白区域填充 + 最上层浅色网格线）
 enum TileStyle {
-    /// 原版瓦片底色 #2a3540（深灰蓝 HUD）
-    static let background = Color(red: 0.165, green: 0.208, blue: 0.251)
-    static let backgroundOpacity = 0.78
-    /// 原版悬停高亮 #4a90d9（系统蓝）
-    static let activeBackground = Color(red: 0.29, green: 0.565, blue: 0.851)
-    static let activeBackgroundOpacity = 0.92
-    /// 区域填充：统一单色，激活区实白、其余半透白（原版无多色）
-    static let zoneFill = Color.white.opacity(0.32)
-    static let zoneActiveFill = Color.white.opacity(0.95)
-    /// 网格线：比边框更淡的浅白
-    static let gridLine = Color.white.opacity(0.28)
-    static let gridLineActive = Color.white.opacity(0.55)
-    /// 区域内分割线：浅色填充块之间用深色细线分割（叠在填充之上、裁剪到区域范围）
-    static let zoneDivider = Color(red: 0.07, green: 0.09, blue: 0.12).opacity(0.6)
-    /// 边框
-    static let border = Color.white.opacity(0.35)
-    static let borderActive = Color.white.opacity(0.8)
-    static let cornerRadius: CGFloat = 8
+    /// 原版瓦片底色：近黑的深灰（rgba(20,20,25,~0.8)），不用系统蓝整块高亮
+    static let background = Color(red: 0.08, green: 0.08, blue: 0.10)
+    static let backgroundOpacity = 0.80
+    /// 原版选中区域填充：淡蓝白 rgba(150,180,220,~0.4)（磨砂亮块）
+    static let zoneFill = Color(red: 0.59, green: 0.71, blue: 0.86).opacity(0.42)
+    /// 悬停激活区域：同一淡蓝白，更实
+    static let zoneActiveFill = Color(red: 0.59, green: 0.71, blue: 0.86).opacity(0.78)
+    /// 网格线：单层、最上层、半透白（穿过填充区时因对比降低显更淡，与原版一致）
+    static let gridLine = Color.white.opacity(0.50)
+    static let gridLineActive = Color.white.opacity(0.65)
+    /// 边框：1px 浅灰白勾勒，悬停稍亮（原版悬停不变蓝、不放大）
+    static let border = Color.white.opacity(0.30)
+    static let borderActive = Color.white.opacity(0.55)
+    static let cornerRadius: CGFloat = 5
 }
 
 /// 顶部瓦片条：各瓦片独立分散（无共享容器框，与原版一致）
@@ -78,21 +74,20 @@ struct TileView: View {
         .frame(width: OverlayMetrics.tileWidth, height: OverlayMetrics.tileHeight)
         .background(
             RoundedRectangle(cornerRadius: TileStyle.cornerRadius, style: .continuous)
-                .fill(hovered
-                      ? TileStyle.activeBackground.opacity(TileStyle.activeBackgroundOpacity)
-                      : TileStyle.background.opacity(TileStyle.backgroundOpacity))
+                .fill(TileStyle.background.opacity(TileStyle.backgroundOpacity))
         )
         .overlay(
             RoundedRectangle(cornerRadius: TileStyle.cornerRadius, style: .continuous)
                 .strokeBorder(hovered ? TileStyle.borderActive : TileStyle.border, lineWidth: 1)
         )
-        .scaleEffect(hovered ? 1.05 : 1)
         .animation(.easeOut(duration: 0.08), value: hovered)
     }
 }
 
-/// 瓦片内的网格预览：所有区域统一单色填充、浅色网格线分割（原版风格，无多色）；
-/// 激活子区域为实白高亮
+/// 瓦片内的网格预览（按原版实拍）：
+/// - 网格线单层画在最上面（半透白），填充块从下面透出
+/// - 单布局瓦片恒显示其区域淡蓝填充（悬停提亮）
+/// - 聚合瓦片平时纯网格分割线；悬停时光标所在子区域出现填充
 struct TilePreview: View {
     let tile: OverlayTile
     let hovered: Bool
@@ -107,7 +102,7 @@ struct TilePreview: View {
             let cw = geo.size.width / CGFloat(cols)
             let ch = geo.size.height / CGFloat(rows)
 
-            // 浅色网格线（铺满整格）
+            // 网格线（单层、最上）
             let gridLines = Path { path in
                 for c in 1..<max(cols, 1) {
                     let x = cw * CGFloat(c)
@@ -120,39 +115,35 @@ struct TilePreview: View {
                     path.addLine(to: CGPoint(x: geo.size.width, y: y))
                 }
             }
-            // 区域并集（作为区域内分割线的蒙版）
-            let zoneUnion = Path { path in
-                for layout in tile.layouts where layout.isValid {
-                    let rect = CGRect(x: cw * CGFloat(layout.startX),
-                                      y: ch * CGFloat(layout.startY),
-                                      width: cw * CGFloat(layout.endX - layout.startX),
-                                      height: ch * CGFloat(layout.endY - layout.startY))
-                    path.addRect(rect)
-                }
-            }
 
             ZStack(alignment: .topLeading) {
-                gridLines
-                    .stroke(hovered ? TileStyle.gridLineActive : TileStyle.gridLine, lineWidth: 1)
-
-                // 各子布局区域（统一色）
-                ForEach(Array(tile.layouts.enumerated()), id: \.element.id) { index, layout in
-                    let isActive = hovered && activeIndex == index
-                    let w = cw * CGFloat(layout.endX - layout.startX)
-                    let h = ch * CGFloat(layout.endY - layout.startY)
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(isActive ? TileStyle.zoneActiveFill : TileStyle.zoneFill)
-                        .frame(width: w, height: h)
-                        .offset(x: cw * CGFloat(layout.startX), y: ch * CGFloat(layout.startY))
+                // 区域填充（在网格线之下）
+                if tile.layouts.count > 1 {
+                    // 聚合瓦片：仅悬停激活的子区域填充
+                    if hovered, let activeIndex,
+                       activeIndex < tile.layouts.count {
+                        zoneFill(tile.layouts[activeIndex], cw: cw, ch: ch,
+                                 color: TileStyle.zoneActiveFill)
+                    }
+                } else if let layout = tile.layouts.first {
+                    // 单布局瓦片：恒显区域填充，悬停提亮
+                    zoneFill(layout, cw: cw, ch: ch,
+                             color: hovered ? TileStyle.zoneActiveFill : TileStyle.zoneFill)
                 }
 
-                // 区域内分割线：浅色块（含激活块）之间/内部始终可见的深色细线
                 gridLines
-                    .stroke(TileStyle.zoneDivider, lineWidth: 1)
-                    .mask(zoneUnion.fill())
+                    .stroke(hovered ? TileStyle.gridLineActive : TileStyle.gridLine, lineWidth: 1)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+    }
+
+    private func zoneFill(_ layout: LayoutItem, cw: CGFloat, ch: CGFloat, color: Color) -> some View {
+        RoundedRectangle(cornerRadius: 1, style: .continuous)
+            .fill(color)
+            .frame(width: cw * CGFloat(layout.endX - layout.startX),
+                   height: ch * CGFloat(layout.endY - layout.startY))
+            .offset(x: cw * CGFloat(layout.startX), y: ch * CGFloat(layout.startY))
     }
 }
 

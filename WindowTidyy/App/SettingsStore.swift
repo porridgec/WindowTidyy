@@ -109,8 +109,8 @@ struct AppSettings: Codable, Equatable {
     var triggerMode = TriggerMode.modifier
     /// 触发修饰键掩码（NSEvent.ModifierFlags 设备无关位），默认 Option
     var triggerModifierMask: UInt = NSEvent.ModifierFlags.option.deviceIndependentRawValue
-    /// 瓦片上是否显示布局名称（原版无文字，默认关闭）
-    var showTileTitles = false
+    /// 瓦片底部是否显示布局名称（原版有 Middle/Grouped 式小字，默认开启）
+    var showTileTitles = true
     /// 瓦片条出现位置：中心点在屏幕铺放区域内的归一化坐标（y 从顶部算）；
     /// 默认顶部居中（约 0.5, 0.06），可在设置的预览画布中自由拖动
     var stripPositionX = 0.5
@@ -143,7 +143,7 @@ struct AppSettings: Codable, Equatable {
         triggerMode = try c.decodeIfPresent(TriggerMode.self, forKey: .triggerMode) ?? .modifier
         triggerModifierMask = try c.decodeIfPresent(UInt.self, forKey: .triggerModifierMask)
             ?? NSEvent.ModifierFlags.option.deviceIndependentRawValue
-        showTileTitles = try c.decodeIfPresent(Bool.self, forKey: .showTileTitles) ?? false
+        showTileTitles = try c.decodeIfPresent(Bool.self, forKey: .showTileTitles) ?? true
         stripPositionX = try c.decodeIfPresent(Double.self, forKey: .stripPositionX) ?? 0.5
         stripPositionY = try c.decodeIfPresent(Double.self, forKey: .stripPositionY) ?? 0.06
         quickGridX = try c.decodeIfPresent(Int.self, forKey: .quickGridX) ?? 6
